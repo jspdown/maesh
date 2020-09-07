@@ -13,6 +13,7 @@ import (
 	"github.com/traefik/mesh/cmd"
 	"github.com/traefik/mesh/cmd/cleanup"
 	"github.com/traefik/mesh/cmd/dns"
+	"github.com/traefik/mesh/cmd/inject"
 	"github.com/traefik/mesh/cmd/prepare"
 	"github.com/traefik/mesh/cmd/version"
 	"github.com/traefik/mesh/pkg/api"
@@ -43,6 +44,12 @@ func main() {
 
 	prepareConfig := cmd.NewPrepareConfiguration()
 	if err := cmdTraefikMesh.AddCommand(prepare.NewCmd(prepareConfig, traefikMeshLoaders)); err != nil {
+		stdlog.Println(err)
+		os.Exit(1)
+	}
+
+	injectConfig := cmd.NewInjectConfiguration()
+	if err := cmdTraefikMesh.AddCommand(inject.NewCmd(injectConfig, traefikMeshLoaders)); err != nil {
 		stdlog.Println(err)
 		os.Exit(1)
 	}

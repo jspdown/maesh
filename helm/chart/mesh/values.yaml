@@ -100,6 +100,40 @@ proxy:
   # Additional pod annotations.
   # podAnnotations: {}
 
+injector:
+  image:
+    name: containous/maesh
+    # (Optional)
+    # pullPolicy: IfNotPresent
+    # (Optional)
+    # tag: v1.1.0
+    # (Optional)
+    # pullSecret: xxx
+
+  # logLevel: error
+  # logFormat: common
+
+  # If not defined, Helm will auto-generate these fields.
+  # (Optional)
+  # caBundle: |
+  # (Optional)
+  # tlsCert: |
+  # (Optional)
+  # tlsKey: |
+
+  resources:
+    limit:
+      mem: 100Mi
+      cpu: 200m
+    request:
+      mem: 50Mi
+      cpu: 100m
+
+  # Added so we can launch on nodes with restrictions.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
 #
 # Tracing configuration.
 #

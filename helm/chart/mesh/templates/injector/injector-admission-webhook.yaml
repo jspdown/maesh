@@ -1,0 +1,61 @@
+{{- $ttl := 9125 }}
+{{- $host := printf "traefik-mesh-injector-webhook.%s.svc" .Release.Namespace }}
+{{- $ca := genSelfSignedCert $host (list) (list $host) $ttl }}
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: traefik-mesh-injector-certs
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: maesh
+    component: injector
+    chart: {{ include "traefikMesh.chartLabel" . | quote }}
+    release: {{ .Release.Name | quote }}
+    heritage: {{ .Release.Service | quote }}
+type: Opaque
+data:
+  cert.pem: {{ .Values.injector.tlsCert | default $ca.Cert | trim | b64enc }}
+  key.pem: {{ .Values.injector.tlsKey | default $ca.Key | trim | b64enc }}
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: traefik-mesh-injector
+  labels:
+    app: maesh
+    component: injector
+    chart: {{ include "traefikMesh.chartLabel" . | quote }}
+    release: {{ .Release.Name | quote }}
+    heritage: {{ .Release.Service | quote }}
+webhooks:
+  - name: injector.mae.sh
+    clientConfig:
+      service:
+        name: traefik-mesh-injector-webhook
+        namespace: {{ .Release.Namespace }}
+        path: "/inject"
+      caBundle: {{ .Values.injector.caBundle | default $ca.Cert | trim | b64enc }}
+    sideEffects: None
+    timeoutSeconds: 5
+    failurePolicy: Fail
+    objectSelector:
+      matchExpressions:
+        - key: app
+          operator: NotIn
+          values:
+            - maesh
+    admissionReviewVersions:
+      - v1
+      - v1beta1
+    rules:
+      - apiGroups:
+          - ""
+        operations:
+          - CREATE
+        apiVersions:
+          - v1
+        resources:
+          - pods

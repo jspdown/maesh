@@ -1,0 +1,132 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traefik-mesh-injector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: maesh
+    component: injector
+    chart: {{ include "traefikMesh.chartLabel" . | quote }}
+    release: {{ .Release.Name | quote }}
+    heritage: {{ .Release.Service | quote }}
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: maesh
+      component: injector
+      release: {{ .Release.Name | quote }}
+  template:
+    metadata:
+      labels:
+        app: maesh
+        component: injector
+        release: {{ .Release.Name | quote }}
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - maesh
+                    - key: component
+                      operator: In
+                      values:
+                        - injector
+                topologyKey: "kubernetes.io/hostname"
+      {{- if .Values.injector.image.pullSecret }}
+      imagePullSecrets:
+        - name: {{ .Values.injector.image.pullSecret }}
+      {{- end }}
+      {{- with .Values.injector.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.injector.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.injector.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: injector
+          image: {{ include "traefikMesh.controllerImage" . | quote }}
+          imagePullPolicy: {{ .Values.injector.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - inject
+            - --tlsCertFile=/etc/injector/certs/cert.pem
+            - --tlsKeyFile=/etc/injector/certs/key.pem
+            - --namespace={{ .Release.Namespace }}
+            - --dnsImage={{ include "traefikMesh.controllerImage" . }}
+            - --clusterDomain
+            - {{ default "cluster.local" .Values.clusterDomain | quote }}
+            {{- if or .Values.injector.logLevel .Values.logLevel }}
+            - --logLevel={{ or .Values.injector.logLevel .Values.logLevel }}
+            {{- end }}
+            {{- if or .Values.injector.logFormat .Values.logFormat }}
+            - --logFormat={{ or .Values.injector.logFormat .Values.logFormat }}
+            {{- end }}
+          volumeMounts:
+            - name: injector-certs
+              mountPath: /etc/injector/certs
+              readOnly: true
+          ports:
+            - name: api
+              containerPort: 443
+          resources:
+            requests:
+              memory: {{ .Values.injector.resources.request.mem }}
+              cpu: {{ .Values.injector.resources.request.cpu }}
+            limits:
+              memory: {{ .Values.injector.resources.limit.mem }}
+              cpu: {{ .Values.injector.resources.limit.cpu }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: api
+              scheme: HTTPS
+            initialDelaySeconds: 2
+            periodSeconds: 1
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: api
+              scheme: HTTPS
+            initialDelaySeconds: 3
+            periodSeconds: 2
+      volumes:
+        - name: injector-certs
+          secret:
+            secretName: traefik-mesh-injector-certs
+
+---
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: traefik-mesh-injector-pdb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: maesh
+    component: injector
+    chart: {{ include "traefikMesh.chartLabel" . | quote }}
+    release: {{ .Release.Name | quote }}
+    heritage: {{ .Release.Service | quote }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: maesh
+      component: injector
+      release: {{ .Release.Name | quote }}

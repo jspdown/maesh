@@ -23,6 +23,7 @@ const (
 )
 
 const (
+	annotationSidecarInjected          = "sidecar-injected"
 	annotationServiceType              = "traffic-type"
 	annotationScheme                   = "scheme"
 	annotationRetryAttempts            = "retry-attempts"
@@ -125,6 +126,28 @@ func GetRateLimitAverage(annotations map[string]string) (int, error) {
 	return average, nil
 }
 
+// GetSidecarInjected returns the value of the sidecar-injected annotation.
+func GetSidecarInjected(annotations map[string]string) (bool, error) {
+	injected, ok := getAnnotation(annotations, annotationSidecarInjected)
+	if !ok {
+		return false, ErrNotFound
+	}
+
+	switch injected {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid value %q for annotation %q", injected, annotationSidecarInjected)
+	}
+}
+
+// SetSidecarInjected sets the sidecar-injected annotation to "true".
+func SetSidecarInjected(annotations map[string]string) {
+	setAnnotation(annotations, annotationSidecarInjected, "true")
+}
+
 // getAnnotation returns the value of the annotation with the given name and a boolean evaluating to true if the
 // annotation has been found, false otherwise. This function will try to resolve the annotation with the traefik mesh
 // domain prefix and fallback to the deprecated maesh domain prefix if not found.
@@ -135,4 +158,9 @@ func getAnnotation(annotations map[string]string, name string) (string, bool) {
 	}
 
 	return value, exists
+}
+
+// setAnnotation sets the annotation value.
+func setAnnotation(annotations map[string]string, name, value string) {
+	annotations["mesh.traefik.io/"+name] = value
 }

@@ -15,6 +15,7 @@ require (
 	github.com/traefik/paerser v0.1.0
 	github.com/traefik/traefik/v2 v2.3.0-rc6
 	github.com/vdemeester/shakers v0.1.0
+	gomodules.xyz/jsonpatch/v2 v2.1.0
 	k8s.io/api v0.18.6
 	k8s.io/apimachinery v0.18.6
 	k8s.io/client-go v0.18.6

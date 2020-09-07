@@ -113,3 +113,32 @@ func NewDNSConfiguration() *DNSConfiguration {
 		Namespace:     "maesh",
 	}
 }
+
+// InjectConfiguration holds the configuration for the inject command.
+type InjectConfiguration struct {
+	Port             int32    `description:"Webhook port." export:"true"`
+	Host             string   `description:"Webhook host to bind to." export:"true"`
+	ResolvConf       string   `description:"DNS resolver configuration." export:"true"`
+	TLSCertFile      string   `description:"TLS certificate path." export:"true"`
+	TLSKeyFile       string   `description:"TLS key path." export:"true"`
+	WatchNamespaces  []string `description:"Namespaces to watch." export:"true"`
+	IgnoreNamespaces []string `description:"Namespaces to ignore." export:"true"`
+	ClusterDomain    string   `description:"Your internal K8s cluster domain." export:"true"`
+	Namespace        string   `description:"The namespace that Traefik Mesh is installed in." export:"true"`
+	LogLevel         string   `description:"The log level." export:"true"`
+	LogFormat        string   `description:"The log format." export:"true"`
+	DNSImage         string   `description:"The DNS proxy image." export:"true"`
+}
+
+// NewInjectConfiguration creates InjectConfiguration.
+func NewInjectConfiguration() *InjectConfiguration {
+	return &InjectConfiguration{
+		Port:          443,
+		ClusterDomain: "cluster.local",
+		Namespace:     "maesh",
+		LogLevel:      "error",
+		LogFormat:     "common",
+		ResolvConf:    "/etc/resolv.conf",
+		DNSImage:      "traefik/mesh:latest",
+	}
+}
