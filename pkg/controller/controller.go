@@ -21,6 +21,7 @@ import (
 	"github.com/traefik/traefik/v2/pkg/config/dynamic"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
@@ -72,8 +73,10 @@ type Controller struct {
 	stopCh chan struct{}
 
 	cfg                  Config
-	workQueue            workqueue.RateLimitingInterface
+	configWorkQueue      workqueue.RateLimitingInterface
+	proxyWorkQueue       workqueue.RateLimitingInterface
 	shadowServiceManager *ShadowServiceManager
+	proxyManager         *ProxyManager
 	provider             *provider.Provider
 	resourceFilter       *k8s.ResourceFilter
 	tcpStateTable        *PortMapping
@@ -84,10 +87,12 @@ type Controller struct {
 
 	clients              k8s.Client
 	kubernetesFactory    informers.SharedInformerFactory
+	proxyFactory         informers.SharedInformerFactory
 	accessFactory        accessinformer.SharedInformerFactory
 	specsFactory         specsinformer.SharedInformerFactory
 	splitFactory         splitinformer.SharedInformerFactory
 	podLister            listers.PodLister
+	proxyLister          listers.PodLister
 	serviceLister        listers.ServiceLister
 	endpointsLister      listers.EndpointsLister
 	trafficTargetLister  accesslister.TrafficTargetLister
@@ -116,17 +121,30 @@ func NewMeshController(clients k8s.Client, cfg Config, store SharedStore, logger
 		k8s.IgnoreApps("maesh", "jaeger"),
 	)
 
-	// Create the work queue and the enqueue handler.
-	c.workQueue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
+	// Create the work queues and the enqueue handlers.
+	c.configWorkQueue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 	handler := cache.FilteringResourceEventHandler{
 		FilterFunc: c.isWatchedResource,
-		Handler:    &enqueueWorkHandler{logger: c.logger, workQueue: c.workQueue},
+		Handler:    &enqueueConfigWorkHandler{workQueue: c.configWorkQueue},
 	}
+
+	c.proxyWorkQueue = workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
+	proxyHandler := &enqueueProxyWorkHandler{workQueue: c.proxyWorkQueue}
 
 	// Create SharedInformers, listers and register the event handler to informers that are not ACL related.
 	c.kubernetesFactory = informers.NewSharedInformerFactoryWithOptions(c.clients.KubernetesClient(), k8s.ResyncPeriod)
 	c.splitFactory = splitinformer.NewSharedInformerFactoryWithOptions(c.clients.SplitClient(), k8s.ResyncPeriod)
 	c.specsFactory = specsinformer.NewSharedInformerFactoryWithOptions(c.clients.SpecsClient(), k8s.ResyncPeriod)
+	// Create a mesh proxy informer to observe proxy creation, updates and deletion.
+	c.proxyFactory = informers.NewSharedInformerFactoryWithOptions(c.clients.KubernetesClient(), k8s.ResyncPeriod,
+		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+			options.FieldSelector = fields.SelectorFromSet(fields.Set{"metadata.namespace": c.cfg.Namespace}).String()
+			options.LabelSelector = fields.SelectorFromSet(fields.Set{
+				k8s.LabelComponent: k8s.ComponentProxy,
+				k8s.LabelApp:       k8s.AppMaesh,
+			}).String()
+		}),
+	)
 
 	c.podLister = c.kubernetesFactory.Core().V1().Pods().Lister()
 	c.endpointsLister = c.kubernetesFactory.Core().V1().Endpoints().Lister()
@@ -134,12 +152,14 @@ func NewMeshController(clients k8s.Client, cfg Config, store SharedStore, logger
 	c.trafficSplitLister = c.splitFactory.Split().V1alpha3().TrafficSplits().Lister()
 	c.httpRouteGroupLister = c.specsFactory.Specs().V1alpha3().HTTPRouteGroups().Lister()
 	c.tcpRouteLister = c.specsFactory.Specs().V1alpha3().TCPRoutes().Lister()
+	c.proxyLister = c.proxyFactory.Core().V1().Pods().Lister()
 
 	c.kubernetesFactory.Core().V1().Services().Informer().AddEventHandler(handler)
 	c.kubernetesFactory.Core().V1().Endpoints().Informer().AddEventHandler(handler)
 	c.splitFactory.Split().V1alpha3().TrafficSplits().Informer().AddEventHandler(handler)
 	c.specsFactory.Specs().V1alpha3().HTTPRouteGroups().Informer().AddEventHandler(handler)
 	c.specsFactory.Specs().V1alpha3().TCPRoutes().Informer().AddEventHandler(handler)
+	c.proxyFactory.Core().V1().Pods().Informer().AddEventHandler(proxyHandler)
 
 	// Create SharedInformers, listers and register the event handler for ACL related resources.
 	if c.cfg.ACLEnabled {
@@ -166,6 +186,11 @@ func NewMeshController(clients k8s.Client, cfg Config, store SharedStore, logger
 		c.cfg.MaxHTTPPort,
 		c.clients.KubernetesClient(),
 	)
+	c.proxyManager = &ProxyManager{
+		kubeClient:  c.clients.KubernetesClient(),
+		proxyLister: c.proxyLister,
+		logger:      c.logger,
+	}
 
 	c.topologyBuilder = topology.NewBuilder(
 		c.serviceLister,
@@ -199,7 +224,8 @@ func (c *Controller) Run() error {
 
 	defer func() {
 		c.logger.Info("Shutting down workers")
-		c.workQueue.ShutDown()
+		c.configWorkQueue.ShutDown()
+		c.proxyWorkQueue.ShutDown()
 
 		waitGroup.Wait()
 	}()
@@ -222,12 +248,21 @@ func (c *Controller) Run() error {
 	// Start to poll work from the queue.
 	waitGroup.Add(1)
 
-	runWorker := func() {
+	runConfigWorker := func() {
 		defer waitGroup.Done()
-		c.runWorker()
+		c.runConfigWorker()
 	}
 
-	go wait.Until(runWorker, time.Second, c.stopCh)
+	go wait.Until(runConfigWorker, time.Second, c.stopCh)
+
+	waitGroup.Add(1)
+
+	runProxyWorker := func() {
+		defer waitGroup.Done()
+		c.runProxyWorker()
+	}
+
+	go wait.Until(runProxyWorker, time.Second, c.stopCh)
 
 	<-c.stopCh
 
@@ -272,6 +307,14 @@ func (c *Controller) startBaseInformers(stopCh <-chan struct{}) error {
 	c.kubernetesFactory.Start(c.stopCh)
 
 	for t, ok := range c.kubernetesFactory.WaitForCacheSync(stopCh) {
+		if !ok {
+			return fmt.Errorf("timed out waiting for controller caches to sync: %s", t)
+		}
+	}
+
+	c.proxyFactory.Start(c.stopCh)
+
+	for t, ok := range c.proxyFactory.WaitForCacheSync(stopCh) {
 		if !ok {
 			return fmt.Errorf("timed out waiting for controller caches to sync: %s", t)
 		}
@@ -326,25 +369,25 @@ func (c *Controller) isWatchedResource(obj interface{}) bool {
 	return !c.resourceFilter.IsIgnored(obj)
 }
 
-// runWorker is a long-running function that will continually call the processNextWorkItem function in order to read and
-// process a message on the work queue.
-func (c *Controller) runWorker() {
-	for c.processNextWorkItem() {
+// runConfigWorker is a long-running function that will continually call the processNextConfigWorkItem function in
+// order to read and process a message on the config work queue.
+func (c *Controller) runConfigWorker() {
+	for c.processNextConfigWorkItem() {
 	}
 }
 
-// processNextWorkItem will read a single work item off the work queue and attempt to process it.
-func (c *Controller) processNextWorkItem() bool {
-	key, quit := c.workQueue.Get()
+// processNextConfigWorkItem will read a single work item off the config work queue and attempt to process it.
+func (c *Controller) processNextConfigWorkItem() bool {
+	key, quit := c.configWorkQueue.Get()
 	if quit {
 		return false
 	}
 
-	defer c.workQueue.Done(key)
+	defer c.configWorkQueue.Done(key)
 
 	if key != configRefreshKey {
 		if err := c.syncShadowService(key.(string)); err != nil {
-			c.handleErr(key, fmt.Errorf("unable to sync shadow service: %w", err))
+			c.handleErr(c.configWorkQueue, key, fmt.Errorf("unable to sync shadow service: %w", err))
 			return true
 		}
 	}
@@ -352,7 +395,7 @@ func (c *Controller) processNextWorkItem() bool {
 	// Build and store config.
 	topo, err := c.topologyBuilder.Build(c.resourceFilter)
 	if err != nil {
-		c.handleErr(key, fmt.Errorf("unable to build topology: %w", err))
+		c.handleErr(c.configWorkQueue, key, fmt.Errorf("unable to build topology: %w", err))
 		return true
 	}
 
@@ -361,45 +404,87 @@ func (c *Controller) processNextWorkItem() bool {
 	c.store.SetTopology(topo)
 	c.store.SetConfig(conf)
 
-	c.workQueue.Forget(key)
+	c.configWorkQueue.Forget(key)
 
 	return true
 }
 
-// syncShadowService calls the shadow service manager to keep the shadow service state in sync with the service events received.
-func (c *Controller) syncShadowService(key string) error {
+// runProxyWorker is a long-running function that will continually call the processNextProxyWorkItem function in
+// order to read and process a message on the proxy work queue.
+func (c *Controller) runProxyWorker() {
+	for c.processNextProxyWorkItem() {
+	}
+}
+
+// processNextProxyWorkItem will read a single work item off the proxy work queue and attempt to process it.
+func (c *Controller) processNextProxyWorkItem() bool {
+	key, quit := c.proxyWorkQueue.Get()
+	if quit {
+		return false
+	}
+
+	defer c.proxyWorkQueue.Done(key)
+
+	if key != configRefreshKey {
+		if err := c.patchProxy(key.(string)); err != nil {
+			c.logger.Errorf("Unable to sync shadow services: %v", err)
+			c.handleErr(c.proxyWorkQueue, key, err)
+		}
+	}
+
+	c.proxyWorkQueue.Forget(key)
+
+	return true
+}
+
+func (c *Controller) patchProxy(key string) error {
+	_, namespace, name, err := parseEventKey(key)
+	if err != nil {
+		c.logger.Errorf("unable to process event %q: %w", key, err)
+		return nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	return c.proxyManager.Patch(ctx, namespace, name)
+}
+
+// syncShadowService calls the shadow service manager to keep the shadow service state in sync with the service and
+// node events received.
+func (c *Controller) syncShadowService(key string) error {
+	kind, namespace, name, err := parseEventKey(key)
 	if err != nil {
-		return err
+		c.logger.Errorf("unable to process event %q: %w", key, err)
+		return nil
 	}
 
-	svc, err := c.serviceLister.Services(namespace).Get(name)
-	if errors.IsNotFound(err) {
-		return c.shadowServiceManager.Delete(ctx, namespace, name)
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	if err != nil {
-		return err
-	}
-
-	_, err = c.shadowServiceManager.CreateOrUpdate(ctx, svc)
-	if err != nil {
-		return err
+	switch kind {
+	case k8s.ServiceKind:
+		if err := c.shadowServiceManager.SyncService(ctx, namespace, name); err != nil {
+			return fmt.Errorf("unable to sync service: %w", err)
+		}
+	case k8s.NodeKind:
+		if err := c.shadowServiceManager.SyncNode(ctx, name); err != nil {
+			return fmt.Errorf("unable to sync node: %w", err)
+		}
+	default:
+		c.logger.Errorf("unable to process event: unknown kind %q", kind)
 	}
 
 	return nil
 }
 
 // handleErr re-queues the given work key only if the maximum number of attempts is not exceeded.
-func (c *Controller) handleErr(key interface{}, err error) {
-	if c.workQueue.NumRequeues(key) < maxRetries {
-		c.workQueue.AddRateLimited(key)
+func (c *Controller) handleErr(workQueue workqueue.RateLimitingInterface, key interface{}, err error) {
+	if workQueue.NumRequeues(key) < maxRetries {
+		workQueue.AddRateLimited(key)
 		return
 	}
 
 	c.logger.Errorf("Unable to complete work %q: %v", key, err)
-	c.workQueue.Forget(key)
+	workQueue.Forget(key)
 }
