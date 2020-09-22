@@ -539,8 +539,8 @@ func addStubDomain(config, blockHeader, blockTrailer, domain, clusterDomain, tra
 %[7]s:53 {
     errors
     rewrite continue {
-        name regex ([a-zA-Z0-9-_]*)\.([a-zv0-9-_]*)\.%[7]s %[3]s-{1}-6d61657368-{2}.%[3]s.svc.%[1]s
-        answer name %[3]s-([a-zA-Z0-9-_]*)-6d61657368-([a-zA-Z0-9-_]*)\.%[3]s\.svc\.%[2]s {1}.{2}.%[7]s
+        name regex ([a-zA-Z0-9-_]*)\.([a-zv0-9-_]*)\.%[7]s {1}-6d61657368-{2}.%[3]s.svc.%[1]s
+        answer name ([a-zA-Z0-9-_]*)-6d61657368-([a-zA-Z0-9-_]*)\.%[3]s\.svc\.%[2]s {1}.{2}.%[7]s
     }
     kubernetes %[1]s in-addr.arpa ip6.arpa {
         pods insecure
