@@ -16,6 +16,7 @@ import (
 	"github.com/traefik/mesh/cmd"
 	"github.com/traefik/mesh/pkg/annotations"
 	"github.com/traefik/mesh/pkg/k8s"
+	"github.com/traefik/mesh/pkg/portmapping"
 	"github.com/traefik/mesh/pkg/provider"
 	"github.com/traefik/mesh/pkg/topology"
 	"github.com/traefik/traefik/v2/pkg/config/dynamic"
@@ -79,8 +80,9 @@ type Controller struct {
 	proxyManager         *ProxyManager
 	provider             *provider.Provider
 	resourceFilter       *k8s.ResourceFilter
-	tcpStateTable        *PortMapping
-	udpStateTable        *PortMapping
+	httpStateTable       *portmapping.MultiplexedPortMapping
+	tcpStateTable        *portmapping.PortMapping
+	udpStateTable        *portmapping.PortMapping
 	topologyBuilder      TopologyBuilder
 	store                SharedStore
 	logger               logrus.FieldLogger
@@ -171,9 +173,9 @@ func NewMeshController(clients k8s.Client, cfg Config, store SharedStore, logger
 		c.kubernetesFactory.Core().V1().Pods().Informer().AddEventHandler(handler)
 	}
 
-	c.tcpStateTable = NewPortMapping(c.cfg.Namespace, c.serviceLister, logger, c.cfg.MinTCPPort, c.cfg.MaxTCPPort)
-
-	c.udpStateTable = NewPortMapping(c.cfg.Namespace, c.serviceLister, logger, c.cfg.MinUDPPort, c.cfg.MaxUDPPort)
+	c.httpStateTable = portmapping.NewMultiplexedPortMapping(c.cfg.MinHTTPPort, c.cfg.MaxHTTPPort)
+	c.tcpStateTable = portmapping.NewPortMapping(c.cfg.MinTCPPort, c.cfg.MaxTCPPort)
+	c.udpStateTable = portmapping.NewPortMapping(c.cfg.MinUDPPort, c.cfg.MaxUDPPort)
 
 	c.shadowServiceManager = NewShadowServiceManager(
 		c.logger,
@@ -204,13 +206,18 @@ func NewMeshController(clients k8s.Client, cfg Config, store SharedStore, logger
 	)
 
 	providerCfg := provider.Config{
-		MinHTTPPort:        c.cfg.MinHTTPPort,
-		MaxHTTPPort:        c.cfg.MaxHTTPPort,
 		ACL:                c.cfg.ACLEnabled,
 		DefaultTrafficType: c.cfg.DefaultMode,
 	}
 
-	c.provider = provider.New(c.tcpStateTable, c.udpStateTable, annotations.BuildMiddlewares, providerCfg, c.logger)
+	c.provider = provider.New(
+		c.httpStateTable,
+		c.tcpStateTable,
+		c.udpStateTable,
+		annotations.BuildMiddlewares,
+		providerCfg,
+		c.logger,
+	)
 
 	return c
 }
