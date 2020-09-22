@@ -31,6 +31,11 @@ const (
 	annotationRateLimitBurst           = "ratelimit-burst"
 )
 
+const (
+	prefixTraefikMesh = "mesh.traefik.io"
+	prefixMaesh       = "maesh.containo.us"
+)
+
 // ErrNotFound indicates that the annotation hasn't been found.
 var ErrNotFound = errors.New("annotation not found")
 
@@ -46,10 +51,15 @@ func GetTrafficType(defaultTrafficType string, annotations map[string]string) (s
 	case ServiceTypeTCP:
 	case ServiceTypeUDP:
 	default:
-		return trafficType, fmt.Errorf("unsupported traffic type %q: %q", annotationServiceType, trafficType)
+		return trafficType, fmt.Errorf("unsupported traffic type %q", trafficType)
 	}
 
 	return trafficType, nil
+}
+
+// SetTrafficType sets the traffic-type annotation to the given value.
+func SetTrafficType(trafficType string, annotations map[string]string) {
+	setAnnotation(annotations, annotationServiceType, trafficType)
 }
 
 // GetScheme returns the value of the scheme annotation.
@@ -129,10 +139,15 @@ func GetRateLimitAverage(annotations map[string]string) (int, error) {
 // annotation has been found, false otherwise. This function will try to resolve the annotation with the traefik mesh
 // domain prefix and fallback to the deprecated maesh domain prefix if not found.
 func getAnnotation(annotations map[string]string, name string) (string, bool) {
-	value, exists := annotations["mesh.traefik.io/"+name]
+	value, exists := annotations[prefixTraefikMesh+"/"+name]
 	if !exists {
-		value, exists = annotations["maesh.containo.us/"+name]
+		value, exists = annotations[prefixMaesh+"/"+name]
 	}
 
 	return value, exists
+}
+
+// setAnnotation sets the annotation value.
+func setAnnotation(annotations map[string]string, name, value string) {
+	annotations[prefixTraefikMesh+"/"+name] = value
 }

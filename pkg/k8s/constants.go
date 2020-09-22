@@ -19,6 +19,8 @@ const (
 
 	// ServiceKind is the name of a corev1.Service.
 	ServiceKind = "Service"
+	// NodeKind is the name of a corev1.Node.
+	NodeKind = "Node"
 	// PodKind is the name of a corev1.Pod.
 	PodKind = "Pod"
 
@@ -37,10 +39,18 @@ const (
 	LabelApp = "app"
 	// LabelNode is the name of the label for storing the node for which the resource has been created.
 	LabelNode = "node"
+	// LabelServiceName is the name of the label for storing the name of the source service for a shadow service.
+	LabelServiceName = "service-name"
+	// LabelServiceNamespace is the name of the label for storing the namespace of the source service for a shadow service.
+	LabelServiceNamespace = "service-namespace"
 
 	// AppMaesh is the name of the app.
 	AppMaesh = "maesh"
 
 	// ComponentProxy is the component name of a mesh proxy.
 	ComponentProxy = "maesh-mesh"
+	// ComponentShadowService is the component name of a shadow service.
+	ComponentShadowService = "shadow-service"
+	// ComponentShadowServiceReplica is the component name of a shadow service replica.
+	ComponentShadowServiceReplica = "shadow-service-replica"
 )

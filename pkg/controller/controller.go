@@ -20,7 +20,7 @@ import (
 	"github.com/traefik/mesh/pkg/provider"
 	"github.com/traefik/mesh/pkg/topology"
 	"github.com/traefik/traefik/v2/pkg/config/dynamic"
-	"k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -93,6 +93,7 @@ type Controller struct {
 	accessFactory        accessinformer.SharedInformerFactory
 	specsFactory         specsinformer.SharedInformerFactory
 	splitFactory         splitinformer.SharedInformerFactory
+	nodeLister           listers.NodeLister
 	podLister            listers.PodLister
 	proxyLister          listers.PodLister
 	serviceLister        listers.ServiceLister
@@ -148,6 +149,7 @@ func NewMeshController(clients k8s.Client, cfg Config, store SharedStore, logger
 		}),
 	)
 
+	c.nodeLister = c.kubernetesFactory.Core().V1().Nodes().Lister()
 	c.podLister = c.kubernetesFactory.Core().V1().Pods().Lister()
 	c.endpointsLister = c.kubernetesFactory.Core().V1().Endpoints().Lister()
 	c.serviceLister = c.kubernetesFactory.Core().V1().Services().Lister()
@@ -156,6 +158,7 @@ func NewMeshController(clients k8s.Client, cfg Config, store SharedStore, logger
 	c.tcpRouteLister = c.specsFactory.Specs().V1alpha3().TCPRoutes().Lister()
 	c.proxyLister = c.proxyFactory.Core().V1().Pods().Lister()
 
+	c.kubernetesFactory.Core().V1().Nodes().Informer().AddEventHandler(handler)
 	c.kubernetesFactory.Core().V1().Services().Informer().AddEventHandler(handler)
 	c.kubernetesFactory.Core().V1().Endpoints().Informer().AddEventHandler(handler)
 	c.splitFactory.Split().V1alpha3().TrafficSplits().Informer().AddEventHandler(handler)
@@ -177,17 +180,19 @@ func NewMeshController(clients k8s.Client, cfg Config, store SharedStore, logger
 	c.tcpStateTable = portmapping.NewPortMapping(c.cfg.MinTCPPort, c.cfg.MaxTCPPort)
 	c.udpStateTable = portmapping.NewPortMapping(c.cfg.MinUDPPort, c.cfg.MaxUDPPort)
 
-	c.shadowServiceManager = NewShadowServiceManager(
-		c.logger,
-		c.serviceLister,
-		c.cfg.Namespace,
-		c.tcpStateTable,
-		c.udpStateTable,
-		c.cfg.DefaultMode,
-		c.cfg.MinHTTPPort,
-		c.cfg.MaxHTTPPort,
-		c.clients.KubernetesClient(),
-	)
+	c.shadowServiceManager = &ShadowServiceManager{
+		namespace:          c.cfg.Namespace,
+		defaultTrafficType: c.cfg.DefaultMode,
+		resourceFilter:     c.resourceFilter,
+		kubeClient:         c.clients.KubernetesClient(),
+		nodeLister:         c.nodeLister,
+		serviceLister:      c.serviceLister,
+		httpStateTable:     c.httpStateTable,
+		tcpStateTable:      c.tcpStateTable,
+		udpStateTable:      c.udpStateTable,
+		logger:             c.logger,
+	}
+
 	c.proxyManager = &ProxyManager{
 		kubeClient:  c.clients.KubernetesClient(),
 		proxyLister: c.proxyLister,
@@ -244,8 +249,8 @@ func (c *Controller) Run() error {
 		return fmt.Errorf("could not start informers: %w", err)
 	}
 
-	// Load the TCP and UDP port mapper states.
-	if err := c.loadPortMappersState(); err != nil {
+	// Load port mappings.
+	if err := c.shadowServiceManager.LoadPortMapping(); err != nil {
 		return fmt.Errorf("could not load port mapper states: %w", err)
 	}
 
@@ -358,21 +363,12 @@ func (c *Controller) startACLInformers(stopCh <-chan struct{}) error {
 	return nil
 }
 
-// loadPortMappersState loads the TCP and UDP port mapper states.
-func (c *Controller) loadPortMappersState() error {
-	if err := c.tcpStateTable.LoadState(); err != nil {
-		return fmt.Errorf("unable to load TCP state table: %w", err)
-	}
-
-	if err := c.udpStateTable.LoadState(); err != nil {
-		return fmt.Errorf("unable to load UDP state table: %w", err)
-	}
-
-	return nil
-}
-
 // isWatchedResource returns true if the given resource is not ignored, false otherwise.
 func (c *Controller) isWatchedResource(obj interface{}) bool {
+	if _, ok := obj.(*corev1.Node); ok {
+		return true
+	}
+
 	return !c.resourceFilter.IsIgnored(obj)
 }
 
