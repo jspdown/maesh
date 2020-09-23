@@ -91,3 +91,25 @@ func NewCleanupConfiguration() *CleanupConfiguration {
 		LogFormat:  "common",
 	}
 }
+
+// DNSConfiguration holds the configuration for the dns command.
+type DNSConfiguration struct {
+	LogLevel      string `description:"The log level." export:"true"`
+	LogFormat     string `description:"The log format." export:"true"`
+	Port          int    `description:"Port on which the proxy is exposed." export:"true"`
+	Upstream      string `description:"Destination endpoint to forward to." export:"true"`
+	Node          string `description:"Name of the node" export:"true"`
+	ClusterDomain string `description:"The internal K8s cluster domain." export:"true"`
+	Namespace     string `description:"The namespace that Traefik Mesh is installed in." export:"true"`
+}
+
+// NewDNSConfiguration creates DNSConfiguration.
+func NewDNSConfiguration() *DNSConfiguration {
+	return &DNSConfiguration{
+		LogLevel:      "error",
+		LogFormat:     "common",
+		Port:          53,
+		ClusterDomain: "cluster.local",
+		Namespace:     "maesh",
+	}
+}
