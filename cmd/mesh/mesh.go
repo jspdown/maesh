@@ -12,6 +12,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/traefik/mesh/cmd"
 	"github.com/traefik/mesh/cmd/cleanup"
+	"github.com/traefik/mesh/cmd/dns"
 	"github.com/traefik/mesh/cmd/prepare"
 	"github.com/traefik/mesh/cmd/version"
 	"github.com/traefik/mesh/pkg/api"
@@ -48,6 +49,12 @@ func main() {
 
 	cleanupConfig := cmd.NewCleanupConfiguration()
 	if err := cmdTraefikMesh.AddCommand(cleanup.NewCmd(cleanupConfig, traefikMeshLoaders)); err != nil {
+		stdlog.Println(err)
+		os.Exit(1)
+	}
+
+	dnsConfig := cmd.NewDNSConfiguration()
+	if err := cmdTraefikMesh.AddCommand(dns.NewCmd(dnsConfig, traefikMeshLoaders)); err != nil {
 		stdlog.Println(err)
 		os.Exit(1)
 	}
