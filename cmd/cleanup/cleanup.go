@@ -40,11 +40,7 @@ func cleanupCommand(config *Configuration) error {
 		return fmt.Errorf("error building clients: %w", err)
 	}
 
-	c := cleanup.NewCleanup(logger, clients.KubernetesClient(), config.Namespace)
-
-	if err := c.CleanShadowServices(ctx); err != nil {
-		return fmt.Errorf("error encountered during cluster cleanup: %w", err)
-	}
+	c := cleanup.NewCleanup(logger, clients.KubernetesClient())
 
 	if err := c.RestoreDNSConfig(ctx); err != nil {
 		return fmt.Errorf("error encountered during DNS restore: %w", err)

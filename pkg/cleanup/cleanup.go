@@ -6,52 +6,33 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/traefik/mesh/v2/pkg/dns"
-	"github.com/traefik/mesh/v2/pkg/k8s"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
+// DNSRestorer is capable of restoring DNS configurations.
+type DNSRestorer interface {
+	CheckDNSProvider(ctx context.Context) (dns.Provider, error)
+	RestoreCoreDNS(ctx context.Context) error
+	RestoreKubeDNS(ctx context.Context) error
+}
+
 // Cleanup holds the clients for the various resource controllers.
 type Cleanup struct {
-	namespace  string
-	kubeClient kubernetes.Interface
-	dnsClient  *dns.Client
-	logger     logrus.FieldLogger
+	dns DNSRestorer
 }
 
 // NewCleanup returns an initialized cleanup object.
-func NewCleanup(logger logrus.FieldLogger, kubeClient kubernetes.Interface, namespace string) *Cleanup {
+func NewCleanup(logger logrus.FieldLogger, kubeClient kubernetes.Interface) *Cleanup {
 	dnsClient := dns.NewClient(logger, kubeClient)
 
 	return &Cleanup{
-		kubeClient: kubeClient,
-		logger:     logger,
-		namespace:  namespace,
-		dnsClient:  dnsClient,
+		dns: dnsClient,
 	}
-}
-
-// CleanShadowServices deletes all shadow services from the cluster.
-func (c *Cleanup) CleanShadowServices(ctx context.Context) error {
-	serviceList, err := c.kubeClient.CoreV1().Services(c.namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: k8s.ShadowServiceSelector().String(),
-	})
-	if err != nil {
-		return err
-	}
-
-	for _, s := range serviceList.Items {
-		if err := c.kubeClient.CoreV1().Services(s.Namespace).Delete(ctx, s.Name, metav1.DeleteOptions{}); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // RestoreDNSConfig restores the configmap and restarts the DNS pods.
 func (c *Cleanup) RestoreDNSConfig(ctx context.Context) error {
-	provider, err := c.dnsClient.CheckDNSProvider(ctx)
+	provider, err := c.dns.CheckDNSProvider(ctx)
 	if err != nil {
 		return err
 	}
@@ -59,11 +40,11 @@ func (c *Cleanup) RestoreDNSConfig(ctx context.Context) error {
 	// Restore configmaps based on DNS provider.
 	switch provider {
 	case dns.CoreDNS:
-		if err := c.dnsClient.RestoreCoreDNS(ctx); err != nil {
+		if err := c.dns.RestoreCoreDNS(ctx); err != nil {
 			return fmt.Errorf("unable to restore CoreDNS: %w", err)
 		}
 	case dns.KubeDNS:
-		if err := c.dnsClient.RestoreKubeDNS(ctx); err != nil {
+		if err := c.dns.RestoreKubeDNS(ctx); err != nil {
 			return fmt.Errorf("unable to restore KubeDNS: %w", err)
 		}
 	}
