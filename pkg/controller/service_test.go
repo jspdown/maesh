@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/traefik/mesh/v2/pkg/annotations"
 	"github.com/traefik/mesh/v2/pkg/k8s"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,6 +56,7 @@ func TestShadowServiceManager_LoadPortMapping(t *testing.T) {
 	_, svcLister := newFakeK8sClient(t, svc1, svc2, shadowSvc1, shadowSvc2)
 
 	mgr := ShadowServiceManager{
+		controller:         newFakeController(),
 		namespace:          testNamespace,
 		defaultTrafficType: testDefaultTrafficType,
 		serviceLister:      svcLister,
@@ -80,6 +82,7 @@ func TestShadowServiceManager_SyncServiceHandlesUnknownTrafficTypes(t *testing.T
 	client, svcLister := newFakeK8sClient(t, svc, shadowSvc)
 
 	mgr := ShadowServiceManager{
+		controller:         newFakeController(),
 		namespace:          testNamespace,
 		defaultTrafficType: testDefaultTrafficType,
 		kubeClient:         client,
@@ -118,6 +121,7 @@ func TestShadowServiceManager_SyncServiceCreateShadowService(t *testing.T) {
 	client, svcLister := newFakeK8sClient(t, svc)
 
 	mgr := ShadowServiceManager{
+		controller:         newFakeController(),
 		namespace:          testNamespace,
 		defaultTrafficType: testDefaultTrafficType,
 		kubeClient:         client,
@@ -182,6 +186,7 @@ func TestShadowServiceManager_SyncServiceUpdateShadowService(t *testing.T) {
 	client, svcLister := newFakeK8sClient(t, updatedSvc, shadowSvc)
 
 	mgr := ShadowServiceManager{
+		controller:         newFakeController(),
 		namespace:          testNamespace,
 		defaultTrafficType: testDefaultTrafficType,
 		kubeClient:         client,
@@ -248,6 +253,7 @@ func TestShadowServiceManager_SyncServiceUpdateShadowServicesAndHandleTrafficTyp
 	client, svcLister := newFakeK8sClient(t, updatedSvc, shadowSvc)
 
 	mgr := ShadowServiceManager{
+		controller:         newFakeController(),
 		namespace:          testNamespace,
 		defaultTrafficType: testDefaultTrafficType,
 		kubeClient:         client,
@@ -299,6 +305,7 @@ func TestShadowServiceManager_SyncServiceDeleteShadowServices(t *testing.T) {
 	client, svcLister := newFakeK8sClient(t, shadowSvc)
 
 	mgr := ShadowServiceManager{
+		controller:         newFakeController(),
 		namespace:          testNamespace,
 		defaultTrafficType: testDefaultTrafficType,
 		kubeClient:         client,
@@ -401,6 +408,15 @@ func newFakeShadowService(t *testing.T, svc *corev1.Service, ports map[int]int) 
 	}
 
 	return shadowSvc
+}
+
+func newFakeController() *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "controller",
+			UID:  "controller",
+		},
+	}
 }
 
 func newFakeK8sClient(t *testing.T, objects ...runtime.Object) (*fake.Clientset, listers.ServiceLister) {

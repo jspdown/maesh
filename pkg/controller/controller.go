@@ -20,6 +20,7 @@ import (
 	"github.com/traefik/mesh/v2/pkg/provider"
 	"github.com/traefik/mesh/v2/pkg/topology"
 	"github.com/traefik/traefik/v2/pkg/config/dynamic"
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -99,7 +100,7 @@ type Controller struct {
 
 // NewMeshController builds the informers and other required components of the mesh controller, and returns an
 // initialized mesh controller object.
-func NewMeshController(clients k8s.Client, cfg Config, store SharedStore, logger logrus.FieldLogger) *Controller {
+func NewMeshController(clients k8s.Client, cfg Config, store SharedStore, logger logrus.FieldLogger) (*Controller, error) {
 	c := &Controller{
 		logger:  logger,
 		cfg:     cfg,
@@ -156,7 +157,13 @@ func NewMeshController(clients k8s.Client, cfg Config, store SharedStore, logger
 	c.tcpStateTable = portmapping.NewPortMapping(c.cfg.MinTCPPort, c.cfg.MaxTCPPort)
 	c.udpStateTable = portmapping.NewPortMapping(c.cfg.MinUDPPort, c.cfg.MaxUDPPort)
 
+	controller, err := c.getControllerDeployment()
+	if err != nil {
+		return nil, fmt.Errorf("unable to retrieve traefik mesh controller deployment: %w", err)
+	}
+
 	c.shadowServiceManager = &ShadowServiceManager{
+		controller:         controller,
 		namespace:          c.cfg.Namespace,
 		serviceLister:      c.serviceLister,
 		httpStateTable:     c.httpStateTable,
@@ -192,7 +199,7 @@ func NewMeshController(clients k8s.Client, cfg Config, store SharedStore, logger
 		c.logger,
 	)
 
-	return c
+	return c, nil
 }
 
 // Run is the main controller loop.
@@ -380,4 +387,25 @@ func (c *Controller) handleErr(key interface{}, err error) {
 
 	c.logger.Errorf("Unable to complete work %q: %v", key, err)
 	c.workQueue.Forget(key)
+}
+
+// getControllerDeployment retrieves the controller deployment.
+func (c *Controller) getControllerDeployment() (*appsv1.Deployment, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	controllerSelector := k8s.ControllerSelector().String()
+
+	deployments, err := c.clients.KubernetesClient().AppsV1().Deployments(c.cfg.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: controllerSelector,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(deployments.Items) == 0 {
+		return nil, fmt.Errorf("unable to find controller with label %q", controllerSelector)
+	}
+
+	return &deployments.Items[0], nil
 }

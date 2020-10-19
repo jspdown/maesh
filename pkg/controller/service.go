@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/traefik/mesh/v2/pkg/annotations"
 	"github.com/traefik/mesh/v2/pkg/k8s"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +18,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	listers "k8s.io/client-go/listers/core/v1"
 )
+
+var controllerKind = appsv1.SchemeGroupVersion.WithKind("Deployment")
 
 // PortMapper is capable of storing and retrieving a port mapping for a given service.
 type PortMapper interface {
@@ -29,6 +32,7 @@ type PortMapper interface {
 // ShadowServiceManager manages shadow services.
 type ShadowServiceManager struct {
 	logger             logrus.FieldLogger
+	controller         metav1.Object
 	serviceLister      listers.ServiceLister
 	namespace          string
 	httpStateTable     PortMapper
@@ -168,6 +172,9 @@ func (s *ShadowServiceManager) createShadowService(ctx context.Context, svc *cor
 			Namespace:   s.namespace,
 			Labels:      shadowSvcLabels,
 			Annotations: map[string]string{},
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(s.controller, controllerKind),
+			},
 		},
 		Spec: corev1.ServiceSpec{
 			Selector: k8s.ProxyLabels(),

@@ -22,6 +22,8 @@ const (
 
 	// ComponentProxy is component of type proxy.
 	ComponentProxy = "proxy"
+	// ComponentController is component of type controller.
+	ComponentController = "controller"
 	// ComponentShadowService is component of type shadow-service.
 	ComponentShadowService = "shadow-service"
 )
@@ -57,6 +59,19 @@ func ShadowServiceSelector() labels.Selector {
 func ProxySelector() labels.Selector {
 	selector, _ := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
 		MatchLabels: ProxyLabels(),
+	})
+
+	return selector
+}
+
+// ControllerSelector creates a label selector for the controller.
+func ControllerSelector() labels.Selector {
+	selector, _ := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			LabelName:      AppName,
+			LabelComponent: ComponentController,
+			LabelPartOf:    AppName,
+		},
 	})
 
 	return selector

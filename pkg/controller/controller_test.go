@@ -36,7 +36,7 @@ func TestController_NewMeshController(t *testing.T) {
 	logger.SetLevel(logrus.DebugLevel)
 
 	// Create a new controller with HTTP as a default traffic type.
-	controller := NewMeshController(clientMock, Config{
+	controller, err := NewMeshController(clientMock, Config{
 		ACLEnabled:       false,
 		DefaultMode:      "http",
 		Namespace:        traefikMeshNamespace,
@@ -49,6 +49,7 @@ func TestController_NewMeshController(t *testing.T) {
 		MaxUDPPort:       maxUDPPort,
 	}, store, logger)
 
+	assert.NoError(t, err)
 	assert.NotNil(t, controller)
 }
 
@@ -61,7 +62,7 @@ func TestController_NewMeshControllerWithACLEnabled(t *testing.T) {
 	logger.SetLevel(logrus.DebugLevel)
 
 	// Create a new controller with HTTP as a default traffic type and ACL enabled.
-	controller := NewMeshController(clientMock, Config{
+	controller, err := NewMeshController(clientMock, Config{
 		ACLEnabled:       true,
 		DefaultMode:      "http",
 		Namespace:        traefikMeshNamespace,
@@ -74,5 +75,6 @@ func TestController_NewMeshControllerWithACLEnabled(t *testing.T) {
 		MaxUDPPort:       maxUDPPort,
 	}, store, logger)
 
+	assert.NoError(t, err)
 	assert.NotNil(t, controller)
 }
