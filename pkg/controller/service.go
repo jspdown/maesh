@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	splitlister "github.com/servicemeshinterface/smi-sdk-go/pkg/gen/client/split/listers/split/v1alpha3"
 	"github.com/sirupsen/logrus"
 	"github.com/traefik/mesh/v2/pkg/annotations"
 	"github.com/traefik/mesh/v2/pkg/k8s"
@@ -30,6 +31,7 @@ type PortMapper interface {
 type ShadowServiceManager struct {
 	logger             logrus.FieldLogger
 	serviceLister      listers.ServiceLister
+	trafficSplitLister splitlister.TrafficSplitLister
 	namespace          string
 	httpStateTable     PortMapper
 	tcpStateTable      PortMapper
@@ -62,6 +64,18 @@ func (s *ShadowServiceManager) LoadPortMapping() error {
 	}
 
 	return nil
+}
+
+func (s *ShadowServiceManager) SyncTrafficSplit(ctx context.Context, namespace, name string) error {
+	trafficSplit, err := s.trafficSplitLister.TrafficSplits(namespace).Get(name)
+	if kerrors.IsNotFound(err) {
+		// remove the shadow service
+	}
+
+	svc, err := s.serviceLister.Services(namespace).Get(name)
+	if kerrors.IsNotFound(err) {
+		return s.deleteShadowService(ctx, namespace, name, shadowSvcName)
+	}
 }
 
 // SyncService synchronizes the given service and its shadow service. If the shadow service doesn't exist it will be

@@ -16,6 +16,8 @@ const (
 	HTTPRouteGroupObjectKind = "HTTPRouteGroup"
 	// TCPRouteObjectKind is the name of an SMI object of kind TCPRoute.
 	TCPRouteObjectKind = "TCPRoute"
+	// ServiceObjectKind is the name of object of kind Service.
+	ServiceObjectKind = "Service"
 
 	// CoreObjectKinds is a filter for objects to process by the core client.
 	CoreObjectKinds = "Deployment|Endpoints|Service|Ingress|Secret|Namespace|Pod|ConfigMap"

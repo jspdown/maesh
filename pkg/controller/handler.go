@@ -1,10 +1,15 @@
 package controller
 
 import (
+	"errors"
+	"fmt"
+	"strings"
+
+	split "github.com/servicemeshinterface/smi-sdk-go/pkg/apis/split/v1alpha3"
 	"github.com/sirupsen/logrus"
+	"github.com/traefik/mesh/v2/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 )
 
@@ -37,16 +42,25 @@ func (h *enqueueWorkHandler) OnDelete(obj interface{}) {
 }
 
 func (h *enqueueWorkHandler) enqueueWork(obj interface{}) {
-	if _, isService := obj.(*corev1.Service); !isService {
+	switch o := obj.(type) {
+	case *corev1.Service:
+		h.workQueue.Add(buildKey(k8s.ServiceObjectKind, o.Namespace, o.Name))
+	case *split.TrafficSplit:
+		h.workQueue.Add(buildKey(k8s.TrafficSplitObjectKind, o.Namespace, o.Name))
+	default:
 		h.workQueue.Add(configRefreshKey)
-		return
+	}
+}
+
+func buildKey(kind, namespace, name string) string {
+	return fmt.Sprint(kind, ":", namespace, ":", name)
+}
+
+func splitKey(key string) (string, string, string, error) {
+	parts := strings.Split(key, ":")
+	if len(parts) != 3 {
+		return "", "", "", errors.New("invalid key")
 	}
 
-	key, err := cache.MetaNamespaceKeyFunc(obj)
-	if err != nil {
-		h.logger.Errorf("Unable to create a work key for resource %#v", obj)
-		return
-	}
-
-	h.workQueue.Add(key)
+	return parts[0], parts[1], parts[2], nil
 }

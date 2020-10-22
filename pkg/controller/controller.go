@@ -335,7 +335,25 @@ func (c *Controller) processNextWorkItem() bool {
 	defer c.workQueue.Done(key)
 
 	if key != configRefreshKey {
-		if err := c.syncShadowService(key.(string)); err != nil {
+		kind, namespace, name, err := splitKey(key.(string))
+		if err != nil {
+			c.handleErr(key, fmt.Errorf("unable to sync shadow service: %w", err))
+			return true
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		switch kind {
+		case k8s.ServiceObjectKind:
+			err = c.shadowServiceManager.SyncService(ctx, namespace, name)
+		case k8s.TrafficSplitObjectKind:
+			err = c.shadowServiceManager.SyncTrafficSplit(ctx, namespace, name)
+		default:
+			err = fmt.Errorf("unknown event kind %q", kind)
+		}
+
+		if err != nil {
 			c.handleErr(key, fmt.Errorf("unable to sync shadow service: %w", err))
 			return true
 		}
@@ -356,19 +374,6 @@ func (c *Controller) processNextWorkItem() bool {
 	c.workQueue.Forget(key)
 
 	return true
-}
-
-// syncShadowService calls the shadow service manager to keep the shadow service state in sync with the service events received.
-func (c *Controller) syncShadowService(key string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	namespace, name, err := cache.SplitMetaNamespaceKey(key)
-	if err != nil {
-		return err
-	}
-
-	return c.shadowServiceManager.SyncService(ctx, namespace, name)
 }
 
 // handleErr re-queues the given work key only if the maximum number of attempts is not exceeded.
